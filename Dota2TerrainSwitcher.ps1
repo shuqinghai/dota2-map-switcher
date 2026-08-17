@@ -57,6 +57,19 @@ function Read-UiText {
     return $json | ConvertFrom-Json
 }
 
+# Steam can retain library entries for a drive that is no longer connected.
+# Do not pass those paths to Join-Path/Test-Path: with ErrorActionPreference=Stop,
+# PowerShell turns the "drive does not exist" error into a startup failure.
+function Test-AvailableDirectory {
+    param([string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
+    try {
+        return [System.IO.Directory]::Exists($Path.Trim().Trim('"'))
+    } catch {
+        return $false
+    }
+}
+
 function Get-ActiveSwapState {
     try {
         if (-not [string]::IsNullOrWhiteSpace($script:StateFileOverride)) {
@@ -208,6 +221,12 @@ function Import-RegistryActiveSwapState {
     foreach ($property in @('mapsDirectory','ownedFile','targetFile','status')) {
         if ([string]::IsNullOrWhiteSpace([string]$registryState[$property])) { throw "Registry state is missing: $property" }
     }
+    if (-not (Test-AvailableDirectory $registryState.mapsDirectory)) {
+        # Registry state belongs to a previous local installation.  It cannot
+        # describe a usable swap when its drive is no longer present.
+        Remove-Item -LiteralPath $script:StateRegistryPath -Recurse -Force
+        return
+    }
     if (Test-Path -LiteralPath $script:StateFileOverride -PathType Leaf) {
         $portableState = Get-ActiveSwapState
         if ($portableState.mapsDirectory -ne $registryState.mapsDirectory -or $portableState.ownedFile -ne $registryState.ownedFile -or $portableState.targetFile -ne $registryState.targetFile) {
@@ -228,6 +247,10 @@ function Import-LegacyActiveSwapState {
             throw "Legacy state is missing: $property"
         }
     }
+    # A portable folder may have been copied from another computer.  Keep an
+    # unreachable legacy record untouched instead of making the new computer
+    # fail to launch (for example, when the old computer used H:\).
+    if (-not (Test-AvailableDirectory ([string]$legacy.mapsDirectory))) { return }
     $state = [ordered]@{
         version       = 2
         status        = [string]$legacy.status
@@ -261,6 +284,7 @@ function Resolve-DotaRoot {
 
     if ([string]::IsNullOrWhiteSpace($Path)) { return $null }
     try { $fullPath = [System.IO.Path]::GetFullPath($Path.Trim().Trim('"')) } catch { return $null }
+    if (-not (Test-AvailableDirectory $fullPath)) { return $null }
 
     $candidates = @(
         $fullPath,
@@ -310,7 +334,7 @@ function Get-SteamLibraryRoots {
 
     $libraries = [System.Collections.Generic.List[string]]::new()
     foreach ($steamRoot in @($steamRoots | Select-Object -Unique)) {
-        if (-not (Test-Path -LiteralPath $steamRoot -PathType Container)) { continue }
+        if (-not (Test-AvailableDirectory $steamRoot)) { continue }
         $libraries.Add($steamRoot)
         $vdf = Join-Path $steamRoot 'steamapps\libraryfolders.vdf'
         if (-not (Test-Path -LiteralPath $vdf -PathType Leaf)) { continue }
@@ -318,7 +342,7 @@ function Get-SteamLibraryRoots {
             $content = [System.IO.File]::ReadAllText($vdf)
             foreach ($match in [regex]::Matches($content, '"path"\s*"([^"\r\n]+)"')) {
                 $library = $match.Groups[1].Value -replace '\\\\', '\'
-                if ($library) { $libraries.Add($library) }
+                if (Test-AvailableDirectory $library) { $libraries.Add($library) }
             }
         } catch { }
     }
@@ -328,6 +352,7 @@ function Get-SteamLibraryRoots {
 function Find-DotaInstallations {
     $found = [System.Collections.Generic.List[string]]::new()
     foreach ($library in Get-SteamLibraryRoots) {
+        if (-not (Test-AvailableDirectory $library)) { continue }
         $steamApps = Join-Path $library 'steamapps'
         $manifest = Join-Path $steamApps 'appmanifest_570.acf'
         if (Test-Path -LiteralPath $manifest -PathType Leaf) {
@@ -492,6 +517,12 @@ function Invoke-SelfTest {
         Write-TestVpk (Join-Path $maps 'dota_desert.vpk') 3
         $resolved = Resolve-DotaRoot $testRoot
         if ($resolved -ne $testRoot) { throw 'Resolve-DotaRoot test failed.' }
+        $missingDrive = @([char[]](68..90 | ForEach-Object { [char]$_ }) | Where-Object {
+            -not [System.IO.Directory]::Exists(([string]$_) + ':\\')
+        }) | Select-Object -First 1
+        if ($missingDrive -and (Resolve-DotaRoot (([string]$missingDrive) + ':\\steamapps\\common\\dota 2 beta'))) {
+            throw 'Unavailable drive path safety test failed.'
+        }
         [void](Invoke-ManagedTerrainSwitch -MapsDirectory $maps -OwnedFile 'dota_ti10.vpk' -TargetFile 'dota.vpk' -OwnedName 'TI10' -TargetName 'Default')
         if ([System.IO.File]::ReadAllBytes((Join-Path $maps 'dota_ti10.vpk'))[4] -ne 1) { throw 'First managed swap test failed.' }
         if (-not (Test-Path -LiteralPath $script:StateFileOverride -PathType Leaf)) { throw 'Persistent state test failed.' }
@@ -735,7 +766,11 @@ function Request-DotaFolder {
 function Initialize-DotaInstallation {
     try {
         $state = Get-ActiveSwapState
-        if ($state -and (Test-VpkFile (Join-Path $state.mapsDirectory 'dota.vpk'))) {
+        if ($state -and -not (Test-AvailableDirectory ([string]$state.mapsDirectory))) {
+            # An app folder copied from another computer can contain a stale
+            # active-state record.  It must not prevent Dota auto-discovery.
+            Clear-ActiveSwapState
+        } elseif ($state -and (Test-VpkFile (Join-Path $state.mapsDirectory 'dota.vpk'))) {
             $script:CurrentMaps = [System.IO.Path]::GetFullPath([string]$state.mapsDirectory)
             return $true
         }
