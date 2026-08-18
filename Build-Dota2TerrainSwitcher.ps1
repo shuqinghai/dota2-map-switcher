@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 $distPath = Join-Path $PSScriptRoot 'dist'
 if (-not (Test-Path -LiteralPath $distPath)) {
     [void](New-Item -ItemType Directory -Path $distPath)
@@ -27,6 +27,8 @@ if (Test-Path -LiteralPath $legacyPortablePath -PathType Container) {
     Remove-Item -LiteralPath $legacyPortablePath -Recurse -Force
 }
 $scriptPath = Join-Path $PSScriptRoot 'Dota2TerrainSwitcher.ps1'
+# The catalog is embedded into the EXE below. After changing terrain mappings,
+# rebuild the EXE/installer so the corrected catalog is actually shipped.
 $catalogPath = Join-Path $PSScriptRoot 'terrain-catalog.json'
 $uiPath = Join-Path $PSScriptRoot 'ui.zh-CN.json'
 $iconSourcePath = Join-Path $PSScriptRoot 'assets\Dota2TerrainSwitcher.png'

@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [switch]$SelfTest,
     [switch]$UiSmokeTest,
@@ -392,6 +392,10 @@ function Test-VpkFile {
     } catch { return $false }
 }
 
+# IMPORTANT: This function only swaps two filenames; it does not identify terrain content.
+# The terrain identity therefore comes entirely from terrain-catalog.json.
+# Keep Valve's original mapping here: Emerald Abyss = dota_cavern.*, Reef's Edge = dota_reef.*.
+# Never re-derive that mapping from a maps folder while a swap is active.
 function Invoke-TerrainSwap {
     param(
         [Parameter(Mandatory)][string]$MapsDirectory,
@@ -490,14 +494,17 @@ function Invoke-SelfTest {
     $oldStateFileOverride = $script:StateFileOverride
     $script:StateFileOverride = Join-Path $testRoot 'active-swap.json'
     try {
+        # Canonical catalog contract. These names refer to Valve's ORIGINAL filenames,
+        # not to whatever content may temporarily sit under a filename after a swap.
+        # In particular: Emerald Abyss -> dota_cavern.*, Reef's Edge -> dota_reef.*.
         $expectedCatalog = [ordered]@{
             divine        = 'dota_ti10.vpk|dota_ti10.png'
             journey       = 'dota_journey.vpk|dota_journey.png'
             overgrown     = 'dota_jungle.vpk|dota_jungle.png'
             summer        = 'dota_summer.vpk|dota_summer.png'
-            emerald_abyss = 'dota_reef.vpk|dota_cavern.png'
+            emerald_abyss = 'dota_cavern.vpk|dota_cavern.png'
             spring        = 'dota_spring.vpk|dota_spring.png'
-            reefs_edge    = 'dota_cavern.vpk|dota_reef.png'
+            reefs_edge    = 'dota_reef.vpk|dota_reef.png'
             autumn        = 'dota_autumn.vpk|dota_autumn.png'
             immortal      = 'dota_coloseum.vpk|dota_coloseum.png'
             winter        = 'dota_winter.vpk|dota_winter.png'
@@ -510,6 +517,15 @@ function Invoke-SelfTest {
             if (-not $expectedCatalog.Contains([string]$terrain.id) -or $expectedCatalog[[string]$terrain.id] -ne $actualMapping) {
                 throw "Terrain catalog mapping test failed: $($terrain.id) / $actualMapping"
             }
+
+            # Every preview image is deliberately named after its matching VPK.  This
+            # invariant catches accidental cross-wiring such as cavern.vpk + reef.png.
+            $vpkStem = [System.IO.Path]::GetFileNameWithoutExtension([string]$terrain.file)
+            $imageStem = [System.IO.Path]::GetFileNameWithoutExtension([string]$terrain.image)
+            if ($vpkStem -ne $imageStem) {
+                throw "Terrain catalog file/image mismatch: $($terrain.id) / $($terrain.file) / $($terrain.image)"
+            }
+
             if ([string]::IsNullOrWhiteSpace([string]$terrain.zh)) { throw "Terrain name is missing: $($terrain.id)" }
         }
         Write-TestVpk (Join-Path $maps 'dota.vpk') 1
@@ -996,6 +1012,10 @@ if (-not $UiCloseTest) {
                 [System.Windows.MessageBox]::Show($text.crashRecoveryGameRunning, $text.crashRecoveryTitle, 'OK', 'Warning') | Out-Null
                 return
             }
+            # Recovery is a second swap of the same two filenames. It assumes the files
+            # were not externally reset after the state was written. If Steam 'Verify
+            # integrity' was used to restore the VPKs, clear the stale active-swap state
+            # before launching this tool again, otherwise this recovery would swap them again.
             [void](Restore-ActiveSwap)
             $script:RecoveredCrashState = $true
         }
