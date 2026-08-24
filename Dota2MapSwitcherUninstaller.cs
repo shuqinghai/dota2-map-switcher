@@ -232,13 +232,13 @@ internal static class Dota2MapSwitcherUninstaller
                 string message = directoryRemains
                     ? "卸载完成。程序文件和记录已删除；安装文件夹中有用户自行放入的文件，因此保留了该文件夹。"
                     : "卸载完成，程序、记录、快捷方式和卸载项已删除。";
-                MessageBox.Show(message, ProductName, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                RtsMessageBox.Show(message, ProductName, MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             return 0;
         }
         catch (Exception error)
         {
-            if (!silent) { MessageBox.Show("卸载未完成：" + error.Message, ProductName, MessageBoxButtons.OK, MessageBoxIcon.Error); }
+            if (!silent) { RtsMessageBox.Show("卸载未完成：" + error.Message, ProductName, MessageBoxButtons.OK, MessageBoxIcon.Error); }
             return 1;
         }
         finally { ScheduleSelfDelete(); }
@@ -254,7 +254,7 @@ internal static class Dota2MapSwitcherUninstaller
             string installDirectory = GetCurrentInstallDirectory();
             if (!silent)
             {
-                DialogResult answer = MessageBox.Show(
+                DialogResult answer = RtsMessageBox.Show(
                     "确定卸载 " + ProductName + " 吗？\r\n\r\n如果存在地图替换记录，卸载器会先恢复地图。",
                     ProductName,
                     MessageBoxButtons.OKCancel,
@@ -278,7 +278,7 @@ internal static class Dota2MapSwitcherUninstaller
         }
         catch (Exception error)
         {
-            if (!silent) { MessageBox.Show("无法卸载：" + error.Message, ProductName, MessageBoxButtons.OK, MessageBoxIcon.Error); }
+            if (!silent) { RtsMessageBox.Show("无法卸载：" + error.Message, ProductName, MessageBoxButtons.OK, MessageBoxIcon.Error); }
             return 1;
         }
     }

@@ -402,12 +402,12 @@ internal static class Dota2MapSwitcherInstaller
                 pathBox.Enabled = browseButton.Enabled = desktopCheckBox.Enabled = installButton.Enabled = cancelButton.Enabled = false;
                 Install(pathBox.Text, desktopCheckBox.Checked);
                 ResultCode = 0;
-                MessageBox.Show(this, "安装完成。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                RtsMessageBox.Show(this, "安装完成。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
                 Close();
             }
             catch (Exception error)
             {
-                MessageBox.Show(this, "安装失败：" + error.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                RtsMessageBox.Show(this, "安装失败：" + error.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
                 pathBox.Enabled = browseButton.Enabled = desktopCheckBox.Enabled = installButton.Enabled = cancelButton.Enabled = true;
             }
             finally { UseWaitCursor = false; }
@@ -436,7 +436,7 @@ internal static class Dota2MapSwitcherInstaller
         }
         catch (Exception error)
         {
-            if (!silent) { MessageBox.Show("安装失败：" + error.Message, ProductName + " 安装程序", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+            if (!silent) { RtsMessageBox.Show("安装失败：" + error.Message, ProductName + " 安装程序", MessageBoxButtons.OK, MessageBoxIcon.Error); }
             return 1;
         }
     }

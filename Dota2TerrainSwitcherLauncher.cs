@@ -50,6 +50,41 @@ internal static class Dota2TerrainSwitcherLauncher
         }
     }
 
+    private static void AddStartupArguments(PowerShell shell, string[] args, bool autoLaunch)
+    {
+        if (!autoLaunch)
+        {
+            AddForwardedArguments(shell, args);
+            return;
+        }
+
+        shell.AddParameter("AutoLaunch");
+        string[] originalCommand = new string[Math.Max(0, args.Length - 1)];
+        if (originalCommand.Length > 0)
+        {
+            Array.Copy(args, 1, originalCommand, 0, originalCommand.Length);
+        }
+        // Environment.GetCommandLineArgs has already applied the Windows command-line
+        // quoting rules. Pass the resulting tokens as an array; the PowerShell layer
+        // quotes each token again only when ProcessStartInfo requires a command string.
+        shell.AddParameter("AutoCommand", originalCommand);
+    }
+
+    private static void WriteAutoBootstrapError(string applicationDirectory, Exception error)
+    {
+        try
+        {
+            string dataDirectory = Path.Combine(applicationDirectory, ".data");
+            Directory.CreateDirectory(dataDirectory);
+            string detail = String.IsNullOrWhiteSpace(error.Message) ? error.GetType().FullName : error.Message;
+            File.AppendAllText(
+                Path.Combine(dataDirectory, "auto-launch.log"),
+                DateTime.Now.ToString("o") + " [ERROR] AutoLaunch bootstrap failed: " + detail + Environment.NewLine,
+                new UTF8Encoding(false));
+        }
+        catch { }
+    }
+
     private static void ExtractResource(string resourceName, string destinationPath)
     {
         using (Stream source = Assembly.GetExecutingAssembly().GetManifestResourceStream(resourceName))
@@ -119,7 +154,7 @@ internal static class Dota2TerrainSwitcherLauncher
             HasValidInstallMarker(applicationDirectory) &&
             File.Exists(Path.Combine(applicationDirectory, "Uninstall.exe"));
         bool isPortable =
-            String.Equals(Path.GetFileName(applicationDirectory), "Dota2MapSwitcher-Portable", StringComparison.OrdinalIgnoreCase) &&
+            !HasValidInstallMarker(applicationDirectory) &&
             File.Exists(Path.Combine(applicationDirectory, "使用说明.txt"));
         if (!isInstalled && !isPortable) { return false; }
 
@@ -148,6 +183,8 @@ internal static class Dota2TerrainSwitcherLauncher
     private static int Main(string[] args)
     {
         SetCurrentProcessExplicitAppUserModelID("Dota2.MapSwitcher");
+        bool autoLaunch = args.Length > 0 &&
+            String.Equals(args[0], "--auto", StringComparison.OrdinalIgnoreCase);
         string applicationDirectory = AppDomain.CurrentDomain.BaseDirectory.TrimEnd(
             Path.DirectorySeparatorChar,
             Path.AltDirectorySeparatorChar);
@@ -156,9 +193,9 @@ internal static class Dota2TerrainSwitcherLauncher
         CleanupRuntimeRoot(runtimeRoot);
         if (!IsValidApplicationDirectory(applicationDirectory))
         {
-            MessageBox.Show(
-                "免安装版只能在 Dota2MapSwitcher-Portable 文件夹中运行。\r\n\r\n" +
-                "请移动或分享整个文件夹，不要单独移动 EXE。如果想在桌面启动，请创建桌面快捷方式。",
+            RtsMessageBox.Show(
+                "免安装版必须和“使用说明.txt”一起放在同一文件夹中运行。\r\n\r\n" +
+                "请移动或分享整个文件夹，不要单独移动 EXE。如果目录位置或名称发生变化，请在自动替换模式中重新复制 Steam 启动参数。",
                 "Dota 2 地图更换器",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);
@@ -215,7 +252,8 @@ internal static class Dota2TerrainSwitcherLauncher
                     shell.AddParameter("AppDirectoryOverride", applicationDirectory);
                     shell.AddParameter("ResourceDirectoryOverride", resourceDirectory);
                     shell.AddParameter("StateFileOverridePath", stateFilePath);
-                    AddForwardedArguments(shell, args);
+                    shell.AddParameter("ExecutablePathOverride", Assembly.GetExecutingAssembly().Location);
+                    AddStartupArguments(shell, args, autoLaunch);
                     shell.Invoke();
                     // WPF can leave HadErrors=true after a handled Closing event even
                     // when the error stream is empty. Only real error records are fatal.
@@ -235,12 +273,17 @@ internal static class Dota2TerrainSwitcherLauncher
         }
         catch (Exception error)
         {
+            if (autoLaunch)
+            {
+                WriteAutoBootstrapError(applicationDirectory, error);
+                return 1;
+            }
             string detail = error.Message;
             if (String.IsNullOrWhiteSpace(detail))
             {
                 detail = error.GetType().FullName;
             }
-            MessageBox.Show(
+            RtsMessageBox.Show(
                 "启动失败：" + detail,
                 "Dota 2 地图更换器",
                 MessageBoxButtons.OK,

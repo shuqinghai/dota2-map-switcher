@@ -92,6 +92,7 @@ $compilerArguments = @(
     ('/out:' + $outputPath),
     ('/win32icon:' + $iconPath),
     '/reference:System.dll',
+    '/reference:System.Drawing.dll',
     ('/reference:' + $automationAssembly),
     '/reference:System.Windows.Forms.dll',
     ('/resource:' + $scriptPath + ',Dota2TerrainSwitcher.ps1'),
@@ -102,12 +103,15 @@ $compilerArguments = @(
 foreach ($terrainImage in $terrainImages) {
     $compilerArguments += ('/resource:' + $terrainImage.FullName + ',terrains.' + $terrainImage.Name)
 }
+$compilerArguments += (Join-Path $PSScriptRoot 'RtsWinFormsDialog.cs')
 $compilerArguments += (Join-Path $PSScriptRoot 'Dota2TerrainSwitcherLauncher.cs')
 & $compiler @compilerArguments
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $outputPath -PathType Leaf)) {
     throw 'EXE compilation failed.'
 }
-Copy-Item -LiteralPath $portableReadmeSource -Destination $portableReadmeOutput
+# Keep the portable Chinese instructions readable in legacy Windows editors.
+$portableReadmeText = [System.IO.File]::ReadAllText($portableReadmeSource, [System.Text.Encoding]::UTF8)
+[System.IO.File]::WriteAllText($portableReadmeOutput, $portableReadmeText, (New-Object System.Text.UTF8Encoding($true)))
 
 $installerBuildDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ('Dota2MapSwitcherBuild_' + [guid]::NewGuid().ToString('N'))
 [void](New-Item -ItemType Directory -Path $installerBuildDirectory)
@@ -121,6 +125,7 @@ try {
         '/reference:System.dll',
         '/reference:System.Drawing.dll',
         '/reference:System.Windows.Forms.dll',
+        (Join-Path $PSScriptRoot 'RtsWinFormsDialog.cs'),
         (Join-Path $PSScriptRoot 'Dota2MapSwitcherUninstaller.cs')
     )
     & $compiler @uninstallerArguments
@@ -138,6 +143,7 @@ try {
         '/reference:System.Windows.Forms.dll',
         ('/resource:' + $outputPath + ',Dota2MapSwitcher.exe'),
         ('/resource:' + $uninstallerOutputPath + ',Uninstall.exe'),
+        (Join-Path $PSScriptRoot 'RtsWinFormsDialog.cs'),
         (Join-Path $PSScriptRoot 'Dota2MapSwitcherInstaller.cs')
     )
     & $compiler @installerArguments
