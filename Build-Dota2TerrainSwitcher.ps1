@@ -1,4 +1,19 @@
-﻿$ErrorActionPreference = 'Stop'
+﻿[CmdletBinding()]
+param([string]$Version)
+
+$ErrorActionPreference = 'Stop'
+$versionFile = Join-Path $PSScriptRoot 'VERSION'
+if ([string]::IsNullOrWhiteSpace($Version)) {
+    if (-not (Test-Path -LiteralPath $versionFile -PathType Leaf)) {
+        throw "Version file is missing: $versionFile"
+    }
+    $Version = [System.IO.File]::ReadAllText($versionFile, [System.Text.Encoding]::UTF8).Trim()
+}
+if ($Version -notmatch '^(?<major>\d+)\.(?<minor>\d+)\.(?<patch>\d+)(?:-[0-9A-Za-z.-]+)?$') {
+    throw "Invalid semantic version: $Version"
+}
+$assemblyVersion = '{0}.{1}.{2}.0' -f $Matches.major, $Matches.minor, $Matches.patch
+
 $distPath = Join-Path $PSScriptRoot 'dist'
 if (-not (Test-Path -LiteralPath $distPath)) {
     [void](New-Item -ItemType Directory -Path $distPath)
@@ -86,6 +101,21 @@ $automationAssembly = powershell.exe -NoProfile -Command '[System.Management.Aut
 if ([string]::IsNullOrWhiteSpace($automationAssembly) -or -not (Test-Path -LiteralPath $automationAssembly -PathType Leaf)) {
     throw 'The Windows PowerShell automation assembly was not found.'
 }
+$buildMetadataDirectory = Join-Path $distPath '.build-metadata'
+if (Test-Path -LiteralPath $buildMetadataDirectory) {
+    Remove-Item -LiteralPath $buildMetadataDirectory -Recurse -Force
+}
+[void](New-Item -ItemType Directory -Path $buildMetadataDirectory)
+$assemblyInfoPath = Join-Path $buildMetadataDirectory 'AssemblyInfo.g.cs'
+try {
+    $assemblyInfoSource = @"
+using System.Reflection;
+[assembly: AssemblyVersion("$assemblyVersion")]
+[assembly: AssemblyFileVersion("$assemblyVersion")]
+[assembly: AssemblyInformationalVersion("$Version")]
+[assembly: AssemblyProduct("Dota 2 地图更换器")]
+"@
+    [System.IO.File]::WriteAllText($assemblyInfoPath, $assemblyInfoSource, (New-Object System.Text.UTF8Encoding($true)))
 $compilerArguments = @(
     '/nologo',
     '/target:winexe',
@@ -98,7 +128,8 @@ $compilerArguments = @(
     ('/resource:' + $scriptPath + ',Dota2TerrainSwitcher.ps1'),
     ('/resource:' + $catalogPath + ',terrain-catalog.json'),
     ('/resource:' + $uiPath + ',ui.zh-CN.json'),
-    ('/resource:' + $iconPath + ',Dota2TerrainSwitcher.ico')
+    ('/resource:' + $iconPath + ',Dota2TerrainSwitcher.ico'),
+    $assemblyInfoPath
 )
 foreach ($terrainImage in $terrainImages) {
     $compilerArguments += ('/resource:' + $terrainImage.FullName + ',terrains.' + $terrainImage.Name)
@@ -125,6 +156,7 @@ try {
         '/reference:System.dll',
         '/reference:System.Drawing.dll',
         '/reference:System.Windows.Forms.dll',
+        $assemblyInfoPath,
         (Join-Path $PSScriptRoot 'RtsWinFormsDialog.cs'),
         (Join-Path $PSScriptRoot 'Dota2MapSwitcherUninstaller.cs')
     )
@@ -143,6 +175,7 @@ try {
         '/reference:System.Windows.Forms.dll',
         ('/resource:' + $outputPath + ',Dota2MapSwitcher.exe'),
         ('/resource:' + $uninstallerOutputPath + ',Uninstall.exe'),
+        $assemblyInfoPath,
         (Join-Path $PSScriptRoot 'RtsWinFormsDialog.cs'),
         (Join-Path $PSScriptRoot 'Dota2MapSwitcherInstaller.cs')
     )
@@ -161,3 +194,8 @@ Compress-Archive -LiteralPath $portablePath -DestinationPath $portableArchivePat
 Write-Output $outputPath
 Write-Output $portableArchivePath
 Write-Output $setupOutputPath
+} finally {
+    if (Test-Path -LiteralPath $buildMetadataDirectory) {
+        Remove-Item -LiteralPath $buildMetadataDirectory -Recurse -Force
+    }
+}

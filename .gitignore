@@ -4,3 +4,4 @@ active-swap.json.tmp
 .data/
 .runtime/
 dist/
+publish/

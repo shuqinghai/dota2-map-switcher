@@ -243,7 +243,7 @@ internal static class Dota2MapSwitcherInstaller
         {
             if (key == null) { throw new InvalidOperationException("无法创建卸载信息。"); }
             key.SetValue("DisplayName", ProductName);
-            key.SetValue("DisplayVersion", "1.1.0");
+            key.SetValue("DisplayVersion", FileVersionInfo.GetVersionInfo(Assembly.GetExecutingAssembly().Location).ProductVersion);
             key.SetValue("Publisher", "Dota 2 Map Switcher");
             key.SetValue("DisplayIcon", appPath + ",0");
             key.SetValue("InstallLocation", installDirectory);

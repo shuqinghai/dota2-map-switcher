@@ -1,9 +1,23 @@
-﻿$ErrorActionPreference = 'Stop'
+﻿[CmdletBinding()]
+param([string]$Version)
+
+$ErrorActionPreference = 'Stop'
 
 $root = $PSScriptRoot
+$versionFile = Join-Path $root 'VERSION'
+if ([string]::IsNullOrWhiteSpace($Version)) {
+    if (-not (Test-Path -LiteralPath $versionFile -PathType Leaf)) {
+        throw "找不到版本文件：$versionFile"
+    }
+    $Version = [System.IO.File]::ReadAllText($versionFile, [System.Text.Encoding]::UTF8).Trim()
+}
+if ($Version -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
+    throw "版本号格式无效：$Version"
+}
 
 Write-Host "== Dota 2 地图替换器：一键检查并构建 ==" -ForegroundColor Cyan
 Write-Host "项目目录：$root"
+Write-Host "构建版本：v$Version"
 Write-Host ""
 
 # Windows PowerShell 5.1 对 UTF-8 无 BOM 的中文 .ps1 兼容不好。
@@ -42,7 +56,7 @@ if (-not (Test-Path -LiteralPath $buildScript -PathType Leaf)) {
     throw "找不到构建脚本：$buildScript"
 }
 
-& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $buildScript
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $buildScript -Version $Version
 if ($LASTEXITCODE -ne 0) {
     throw "构建失败。"
 }

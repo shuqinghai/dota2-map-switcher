@@ -8,6 +8,28 @@
 
 项目同时生成安装版和免安装版。
 
+版本号以根目录的 `VERSION` 为准。日常构建使用 `Build-Release.ps1`；对外发布使用 `Publish-Release.ps1`。例如当前版本为 `1.1.5`，下面的命令会将补丁版本升级为 `1.1.6`，运行自检和构建，并在 `publish\v1.1.6` 生成带版本号的 ZIP、安装程序、更新说明和 SHA-256 校验文件：
+
+```powershell
+.\Publish-Release.ps1 -Bump Patch
+```
+
+构建前应先编辑 `RELEASE-NOTES.md`。只构建 `VERSION` 中已经记录的版本时，不传 `-Bump`：
+
+```powershell
+.\Publish-Release.ps1
+```
+
+需要同时创建 Git 版本提交、标签、push 并上传 GitHub Release 时，必须保证工作区已提交、`gh auth status` 正常，然后显式加上开关：
+
+```powershell
+.\Publish-Release.ps1 -Bump Patch -PublishGitHub
+```
+
+`dist` 和 `publish` 都是可重新生成的本地产物，不提交到 Git；GitHub Release 和夸克只上传 `publish\v版本号` 中的文件。外部 ZIP/EXE 文件名带版本号，免安装 ZIP 内部的 `Dota2MapSwitcher-Portable\Dota2MapSwitcher.exe` 路径保持稳定。
+
+完整的每次发布步骤、夸克目录结构、检查表和失败恢复方法见 [`RELEASE-WORKFLOW.md`](RELEASE-WORKFLOW.md)。
+
 安装版：
 
 ```text
