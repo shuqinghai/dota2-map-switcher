@@ -778,6 +778,34 @@ function Write-TestVpk {
     [System.IO.File]::WriteAllBytes($Path, $bytes)
 }
 
+function Set-ClipboardTextWithRetry {
+    param(
+        [Parameter(Mandatory)][string]$Text,
+        [ValidateRange(1,100)][int]$AttemptCount = 20,
+        [ValidateRange(0,10000)][int]$RetryDelayMilliseconds = 100,
+        [scriptblock]$ClipboardWriter
+    )
+
+    if (-not $ClipboardWriter) {
+        $ClipboardWriter = {
+            param([string]$Value)
+            [System.Windows.Forms.Clipboard]::SetDataObject([object]$Value, $true)
+        }
+    }
+
+    for ($attempt = 1; $attempt -le $AttemptCount; $attempt++) {
+        try {
+            & $ClipboardWriter $Text
+            return
+        } catch {
+            if ($attempt -eq $AttemptCount) { throw }
+            if ($RetryDelayMilliseconds -gt 0) {
+                Start-Sleep -Milliseconds $RetryDelayMilliseconds
+            }
+        }
+    }
+}
+
 function Invoke-SelfTest {
     $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('Dota2TerrainSwitcher_' + [guid]::NewGuid().ToString('N'))
     $maps = Join-Path $testRoot 'game\dota\maps'
@@ -834,6 +862,40 @@ function Invoke-SelfTest {
 
             if ([string]::IsNullOrWhiteSpace([string]$terrain.zh)) { throw "Terrain name is missing: $($terrain.id)" }
         }
+
+        # Clipboard retry fault injection.  This deliberately avoids touching
+        # the user's real clipboard while reproducing transient and persistent
+        # CLIPBRD_E_CANT_OPEN-style failures.
+        $clipboardRetryState = [pscustomobject]@{ Attempts = 0; WrittenText = $null }
+        $transientClipboardWriter = {
+            param([string]$Value)
+            $clipboardRetryState.Attempts++
+            if ($clipboardRetryState.Attempts -lt 3) {
+                throw New-Object System.Runtime.InteropServices.ExternalException('OpenClipboard failed', [int]0x800401D0)
+            }
+            $clipboardRetryState.WrittenText = $Value
+        }.GetNewClosure()
+        Set-ClipboardTextWithRetry -Text 'clipboard retry test' -AttemptCount 3 -RetryDelayMilliseconds 0 -ClipboardWriter $transientClipboardWriter
+        if ($clipboardRetryState.Attempts -ne 3 -or $clipboardRetryState.WrittenText -ne 'clipboard retry test') {
+            throw 'Clipboard transient retry test failed.'
+        }
+
+        $persistentClipboardState = [pscustomobject]@{ Attempts = 0 }
+        $persistentClipboardWriter = {
+            param([string]$Value)
+            $persistentClipboardState.Attempts++
+            throw New-Object System.Runtime.InteropServices.ExternalException('OpenClipboard failed', [int]0x800401D0)
+        }.GetNewClosure()
+        $persistentClipboardFailed = $false
+        try {
+            Set-ClipboardTextWithRetry -Text 'clipboard failure test' -AttemptCount 3 -RetryDelayMilliseconds 0 -ClipboardWriter $persistentClipboardWriter
+        } catch {
+            $persistentClipboardFailed = $true
+        }
+        if (-not $persistentClipboardFailed -or $persistentClipboardState.Attempts -ne 3) {
+            throw 'Clipboard persistent failure test failed.'
+        }
+
         Write-TestVpk (Join-Path $maps 'dota.vpk') 1
         Write-TestVpk (Join-Path $maps 'dota_ti10.vpk') 2
         Write-TestVpk (Join-Path $maps 'dota_desert.vpk') 3
@@ -1713,13 +1775,20 @@ function Show-AppDialog {
         $exampleBorder.Background = Get-UiBrush '#070C0F'
         $exampleBorder.BorderBrush = Get-UiResource 'GoldBorderBrush'
         $exampleBorder.BorderThickness = New-Object Windows.Thickness 1
-        $exampleText = New-Object Windows.Controls.TextBlock
+        $exampleText = New-Object Windows.Controls.TextBox
         $exampleText.Text = $CodeExample
         $exampleText.Foreground = Get-UiBrush '#D8D1BF'
+        $exampleText.Background = [Windows.Media.Brushes]::Transparent
+        $exampleText.BorderThickness = New-Object Windows.Thickness 0
+        $exampleText.Padding = New-Object Windows.Thickness 0
         $exampleText.FontFamily = New-Object Windows.Media.FontFamily 'Consolas'
         $exampleText.FontSize = 13
-        $exampleText.LineHeight = 20
         $exampleText.TextWrapping = [Windows.TextWrapping]::Wrap
+        $exampleText.IsReadOnly = $true
+        $exampleText.IsReadOnlyCaretVisible = $true
+        $exampleText.AcceptsReturn = $true
+        $exampleText.HorizontalScrollBarVisibility = [Windows.Controls.ScrollBarVisibility]::Disabled
+        $exampleText.VerticalScrollBarVisibility = [Windows.Controls.ScrollBarVisibility]::Disabled
         $exampleBorder.Child = $exampleText
         [void]$body.Children.Add($exampleBorder)
     }
@@ -2171,7 +2240,38 @@ $ui.CopyStatusCloseButton.Add_Click({ $ui.CopyStatusBorder.Visibility = [Windows
 function Copy-SteamLaunchOption {
     try {
         $launchOption = Get-SteamLaunchOption
-        [System.Windows.Clipboard]::SetText($launchOption)
+    } catch {
+        Show-OperationError ("无法生成 Steam 启动参数。`r`n`r`n$($_.Exception.Message)")
+        return $false
+    }
+
+    while ($true) {
+        try {
+            Set-ClipboardTextWithRetry -Text $launchOption
+            break
+        } catch {
+            $clipboardError = $_.Exception.GetBaseException().Message
+            $clipboardMessage = @"
+程序已自动重试，但剪贴板仍被其他程序占用。
+
+请稍后点击“重新复制”。如果持续失败，请暂时关闭剪贴板管理器、远程桌面、输入法或截图工具后再试。
+
+下方是完整启动参数，可以选中后按 Ctrl+C：
+
+系统返回：$clipboardError
+"@
+            $result = Show-AppDialog `
+                -Title '剪贴板暂时不可用' `
+                -Message $clipboardMessage `
+                -CodeExample $launchOption `
+                -PrimaryText '重新复制' `
+                -SecondaryText '关闭' `
+                -Kind Warning
+            if ($result.action -ne 'Primary') { return $false }
+        }
+    }
+
+    try {
         $config = Get-AutoModeConfig
         $config.launcherPath = [System.IO.Path]::GetFullPath($script:ExecutablePath)
         $script:AutoConfig = Save-AutoModeConfig -Config $config
@@ -2179,7 +2279,7 @@ function Copy-SteamLaunchOption {
         Show-CopySuccessStatus
         return $true
     } catch {
-        Show-OperationError ("复制 Steam 启动参数失败，请手动复制。`r`n`r`n$($_.Exception.Message)")
+        Show-OperationError ("启动参数已复制，但无法保存当前程序路径。`r`n`r`n$($_.Exception.Message)")
         return $false
     }
 }
