@@ -3,3 +3,4 @@ active-swap.json
 active-swap.json.tmp
 .data/
 .runtime/
+dist/
