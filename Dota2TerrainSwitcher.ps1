@@ -142,6 +142,21 @@ function Save-AutoModeConfig {
     return [pscustomobject]$value
 }
 
+function Set-AutoModeTerrainSelection {
+    param(
+        [Parameter(Mandatory)][string]$OwnedTerrain,
+        [Parameter(Mandatory)][string]$Terrain,
+        [string]$MapsDirectory
+    )
+    $config = Get-AutoModeConfig
+    $config.ownedTerrain = $OwnedTerrain
+    $config.terrain = $Terrain
+    if (-not [string]::IsNullOrWhiteSpace($MapsDirectory)) {
+        $config.mapsDirectory = $MapsDirectory
+    }
+    return Save-AutoModeConfig -Config $config
+}
+
 function Get-UiSettings {
     $defaults = [ordered]@{
         version                   = 1
@@ -900,9 +915,14 @@ function Invoke-SelfTest {
         $config = [pscustomobject]@{ enabled=$true; ownedTerrain='divine'; terrain='desert'; mapsDirectory=$maps; launcherPath=$script:ExecutablePath }
         $savedConfig = Save-AutoModeConfig -Config $config
         if (-not $savedConfig.enabled -or $savedConfig.terrain -ne 'desert' -or (Get-AutoModeConfig).ownedTerrain -ne 'divine') { throw 'Auto config persistence test failed.' }
+        $savedConfig = Set-AutoModeTerrainSelection -OwnedTerrain 'divine' -Terrain 'journey'
+        if (-not $savedConfig.enabled -or $savedConfig.terrain -ne 'journey' -or $savedConfig.launcherPath -ne $script:ExecutablePath) {
+            throw 'Changing the automatic terrain must preserve the enabled switch and launcher path.'
+        }
+        $savedConfig = Set-AutoModeTerrainSelection -OwnedTerrain 'divine' -Terrain 'desert'
         if ($ownedBeforeActivation -ne [Convert]::ToBase64String([System.IO.File]::ReadAllBytes((Join-Path $maps 'dota_ti10.vpk'))) -or
             $targetBeforeActivation -ne [Convert]::ToBase64String([System.IO.File]::ReadAllBytes((Join-Path $maps 'dota_desert.vpk')))) {
-            throw 'Auto activation unexpectedly modified a VPK.'
+            throw 'Saving or enabling an automatic terrain unexpectedly modified a VPK.'
         }
 
         # Compile a tiny fake dota2.exe that records its exact argv. This verifies
@@ -1303,6 +1323,7 @@ $xaml = @'
       </ControlTemplate></Setter.Value></Setter>
     </Style>
     <Style x:Key="RtsPrimaryButtonStyle" TargetType="Button" BasedOn="{StaticResource RtsSecondaryButtonStyle}"><Setter Property="Background" Value="{StaticResource PrimaryButtonBrush}"/><Setter Property="BorderBrush" Value="#415C72"/><Setter Property="Foreground" Value="#F0C957"/></Style>
+    <Style x:Key="RtsAttentionButtonStyle" TargetType="Button" BasedOn="{StaticResource RtsSecondaryButtonStyle}"><Setter Property="Background" Value="#5A3E0D"/><Setter Property="BorderBrush" Value="#E0A92E"/><Setter Property="Foreground" Value="#FFE184"/><Setter Property="FontWeight" Value="Bold"/></Style>
     <Style x:Key="RtsSmallButtonStyle" TargetType="Button" BasedOn="{StaticResource RtsSecondaryButtonStyle}"><Setter Property="Padding" Value="11,5"/><Setter Property="FontSize" Value="12"/><Setter Property="FontWeight" Value="Normal"/></Style>
     <Style x:Key="RtsStatusButtonStyle" TargetType="Button">
       <Setter Property="Foreground" Value="#8ED36A"/><Setter Property="Background" Value="#172A1B"/><Setter Property="BorderBrush" Value="#47673A"/><Setter Property="BorderThickness" Value="2"/><Setter Property="Padding" Value="14,6"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Border Background="#090E0A" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="2" CornerRadius="2"><Border Margin="2" Background="{TemplateBinding Background}" BorderBrush="#6B713B" BorderThickness="1"><ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border></Border></ControlTemplate></Setter.Value></Setter>
@@ -1352,12 +1373,18 @@ $xaml = @'
                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                 <WrapPanel Grid.Row="0" Grid.Column="0" Name="AutoActionsPanel" Visibility="Collapsed">
-                  <Button Name="ActivateAutoButton" Content="激活自动替换" Style="{StaticResource RtsPrimaryButtonStyle}" MinWidth="140" Height="38" Margin="0,0,10,0"/>
-                  <Button Name="CancelAutoButton" Content="取消激活" Style="{StaticResource RtsSecondaryButtonStyle}" MinWidth="112" Height="38" Margin="0,0,10,0"/>
+                  <Button Name="ActivateAutoButton" Content="开启自动替换" Style="{StaticResource RtsPrimaryButtonStyle}" MinWidth="140" Height="38" Margin="0,0,10,0"/>
+                  <Button Name="CancelAutoButton" Content="关闭自动替换" Style="{StaticResource RtsSecondaryButtonStyle}" MinWidth="112" Height="38" Margin="0,0,10,0"/>
                   <Button Name="CopyLaunchButton" Content="复制 Steam 启动参数" Style="{StaticResource RtsPrimaryButtonStyle}" MinWidth="190" Height="38"/>
                 </WrapPanel>
                 <Button Grid.Row="0" Grid.Column="1" Name="ResetTutorialButton" Content="重置教程" Style="{StaticResource RtsSmallButtonStyle}" MinWidth="105" Height="36"/>
-                <Border Grid.Row="1" Grid.ColumnSpan="2" Name="CopyStatusBorder" Margin="0,8,0,0" Padding="10,7" Background="#12261A" BorderBrush="#607B3C" BorderThickness="1" Visibility="Collapsed"><TextBlock Name="CopyStatusText" Foreground="#9DD57B" FontSize="13" TextWrapping="Wrap"/></Border>
+                <Border Grid.Row="1" Grid.ColumnSpan="2" Name="CopyStatusBorder" Margin="0,8,0,0" Padding="10,7" Background="#12261A" BorderBrush="#607B3C" BorderThickness="1" Visibility="Collapsed">
+                  <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Name="CopyStatusText" Foreground="#9DD57B" FontSize="13" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                    <Button Grid.Column="1" Name="CopyStatusCloseButton" Content="×" Style="{StaticResource RtsSmallButtonStyle}" Width="30" Height="26" Margin="10,0,0,0" Padding="0" FontSize="16" ToolTip="关闭提示"/>
+                  </Grid>
+                </Border>
               </Grid>
             </Border>
             <Border Grid.Row="1" Margin="7,0,7,0" Background="#080F13" BorderBrush="{StaticResource IronInnerBorderBrush}" BorderThickness="2" CornerRadius="2">
@@ -1390,7 +1417,7 @@ if (Test-Path -LiteralPath $script:IconPath -PathType Leaf) {
         }
     } catch { }
 }
-$uiNames = @('TitleText','ModeSelectionPage','TerrainPage','NormalModeChoice','AutoModeChoice','NextButton','AutoActionsPanel','ActivateAutoButton','CancelAutoButton','CopyLaunchButton','ResetTutorialButton','CopyStatusBorder','CopyStatusText','TerrainPanel','BackButton','DialogOverlay')
+$uiNames = @('TitleText','ModeSelectionPage','TerrainPage','NormalModeChoice','AutoModeChoice','NextButton','AutoActionsPanel','ActivateAutoButton','CancelAutoButton','CopyLaunchButton','ResetTutorialButton','CopyStatusBorder','CopyStatusText','CopyStatusCloseButton','TerrainPanel','BackButton','DialogOverlay')
 $ui = @{}
 foreach ($name in $uiNames) { $ui[$name] = $window.FindName($name) }
 
@@ -1410,8 +1437,8 @@ $script:CurrentUiMode = $null
 $script:NormalGuideShownThisRun = $false
 $script:AutoGuideShownThisRun = $false
 $script:NormalModeInitialized = $false
+$script:AutoSelectionChangedThisRun = $false
 $script:SessionTimer = $null
-$script:CopyStatusTimer = $null
 $script:DialogSnapshotPath = $null
 $script:DialogSnapshotDpi = 96
 $script:IsBusy = $false
@@ -1935,6 +1962,8 @@ function Invoke-CardSwap {
 function Invoke-AutoTerrainCardClick {
     param([Parameter(Mandatory)][string]$FileName)
     if ($script:IsBusy -or -not $script:CatalogLookup.ContainsKey($FileName)) { return }
+    $previousOwnedFile = $script:AutoSelectedOwnedFile
+    $previousTargetFile = $script:AutoSelectedTargetFile
     if ([string]::IsNullOrWhiteSpace($script:AutoSelectedOwnedFile)) {
         $script:AutoSelectedOwnedFile = $FileName
         $script:AutoSelectedTargetFile = $null
@@ -1945,6 +1974,24 @@ function Invoke-AutoTerrainCardClick {
         $script:AutoSelectedTargetFile = $FileName
     }
     Update-CardVisuals
+    if ([string]::IsNullOrWhiteSpace($script:AutoSelectedOwnedFile) -or [string]::IsNullOrWhiteSpace($script:AutoSelectedTargetFile)) { return }
+
+    try {
+        $owned = $script:CatalogLookup[$script:AutoSelectedOwnedFile]
+        $target = $script:CatalogLookup[$script:AutoSelectedTargetFile]
+        $previousConfig = Get-AutoModeConfig
+        $selectionChanged = [string]$previousConfig.ownedTerrain -ne [string]$owned.id -or
+            [string]$previousConfig.terrain -ne [string]$target.id
+        $script:AutoConfig = Set-AutoModeTerrainSelection -OwnedTerrain ([string]$owned.id) -Terrain ([string]$target.id) -MapsDirectory $script:CurrentMaps
+        if ($selectionChanged) { $script:AutoSelectionChangedThisRun = $true }
+        [void](Update-AutoConfigVisuals -Config $script:AutoConfig)
+        Show-AutoSelectionSavedStatus
+    } catch {
+        $script:AutoSelectedOwnedFile = $previousOwnedFile
+        $script:AutoSelectedTargetFile = $previousTargetFile
+        Update-CardVisuals
+        Show-OperationError ('自动地图选择保存失败，已恢复原选择。' + $_.Exception.Message)
+    }
 }
 
 function Invoke-TerrainCardClick {
@@ -2059,8 +2106,15 @@ function Get-CatalogFileById {
 
 function Update-AutoConfigVisuals {
     param([Parameter(Mandatory)]$Config)
-    $ui.ActivateAutoButton.Content = if ($Config.enabled) { '●  已激活' } else { '激活自动替换' }
-    $ui.ActivateAutoButton.Style = Get-UiResource $(if ($Config.enabled) { 'RtsStatusButtonStyle' } else { 'RtsPrimaryButtonStyle' })
+    $ui.ActivateAutoButton.Content = if ($Config.enabled) { '●  自动替换已开启' } else { '开启自动替换' }
+    $autoButtonStyle = if ($Config.enabled) {
+        'RtsStatusButtonStyle'
+    } elseif ($script:AutoSelectionChangedThisRun) {
+        'RtsAttentionButtonStyle'
+    } else {
+        'RtsPrimaryButtonStyle'
+    }
+    $ui.ActivateAutoButton.Style = Get-UiResource $autoButtonStyle
     $ui.ActivateAutoButton.IsEnabled = $true
     $ui.ActivateAutoButton.IsHitTestVisible = -not [bool]$Config.enabled
     $ui.CancelAutoButton.IsEnabled = [bool]$Config.enabled
@@ -2083,19 +2137,36 @@ $script:AutoSelectedTargetFile = Get-CatalogFileById ([string]$script:AutoConfig
 $script:LauncherPathMoved = [bool](Update-AutoConfigVisuals -Config $script:AutoConfig)
 
 function Show-CopySuccessStatus {
-    $ui.CopyStatusText.Text = 'Steam 启动参数已复制。粘贴位置：Steam 客户端 → 库 → 右键 Dota 2 → 属性 → 通用 → 启动选项'
-    $ui.CopyStatusBorder.Visibility = [Windows.Visibility]::Visible
-    if (-not $script:CopyStatusTimer) {
-        $script:CopyStatusTimer = New-Object Windows.Threading.DispatcherTimer
-        $script:CopyStatusTimer.Interval = [TimeSpan]::FromSeconds(2)
-        $script:CopyStatusTimer.Add_Tick({
-            $script:CopyStatusTimer.Stop()
-            $ui.CopyStatusBorder.Visibility = [Windows.Visibility]::Collapsed
-        })
+    if ($script:AutoSelectionChangedThisRun -and -not $script:AutoConfig.enabled) {
+        $ui.CopyStatusBorder.Background = Get-UiBrush '#2A2112'
+        $ui.CopyStatusBorder.BorderBrush = Get-UiResource 'WarningBorderBrush'
+        $ui.CopyStatusText.Foreground = Get-UiBrush '#F0C957'
+        $ui.CopyStatusText.Text = 'Steam 启动参数已复制，但自动替换尚未开启。请点击上方“开启自动替换”。'
+    } else {
+        $ui.CopyStatusBorder.Background = Get-UiBrush '#12261A'
+        $ui.CopyStatusBorder.BorderBrush = Get-UiBrush '#607B3C'
+        $ui.CopyStatusText.Foreground = Get-UiBrush '#9DD57B'
+        $ui.CopyStatusText.Text = 'Steam 启动参数已复制。粘贴位置：Steam 客户端 → 库 → 右键 Dota 2 → 属性 → 通用 → 启动选项'
     }
-    $script:CopyStatusTimer.Stop()
-    $script:CopyStatusTimer.Start()
+    $ui.CopyStatusBorder.Visibility = [Windows.Visibility]::Visible
 }
+
+function Show-AutoSelectionSavedStatus {
+    if ($script:AutoConfig.enabled) {
+        $ui.CopyStatusBorder.Background = Get-UiBrush '#12261A'
+        $ui.CopyStatusBorder.BorderBrush = Get-UiBrush '#607B3C'
+        $ui.CopyStatusText.Foreground = Get-UiBrush '#9DD57B'
+        $ui.CopyStatusText.Text = '新地图已自动保存，将从下一次 Steam 启动 Dota 2 起生效。'
+    } else {
+        $ui.CopyStatusBorder.Background = Get-UiBrush '#2A2112'
+        $ui.CopyStatusBorder.BorderBrush = Get-UiResource 'WarningBorderBrush'
+        $ui.CopyStatusText.Foreground = Get-UiBrush '#F0C957'
+        $ui.CopyStatusText.Text = '地图选择已保存，但自动替换尚未开启。请点击上方“开启自动替换”。'
+    }
+    $ui.CopyStatusBorder.Visibility = [Windows.Visibility]::Visible
+}
+
+$ui.CopyStatusCloseButton.Add_Click({ $ui.CopyStatusBorder.Visibility = [Windows.Visibility]::Collapsed })
 
 function Copy-SteamLaunchOption {
     try {
@@ -2113,30 +2184,35 @@ function Copy-SteamLaunchOption {
     }
 }
 
-$ui.ActivateAutoButton.Add_Click({
+function Enable-AutoModeForUi {
+    if ([string]::IsNullOrWhiteSpace($script:AutoSelectedOwnedFile) -or [string]::IsNullOrWhiteSpace($script:AutoSelectedTargetFile)) {
+        throw '请先选择您已经拥有的地图和需要替换的目标地图。'
+    }
+    if ($script:AutoSelectedOwnedFile -eq $script:AutoSelectedTargetFile) { throw '已拥有地图和目标地图不能相同。' }
+    $owned = $script:CatalogLookup[$script:AutoSelectedOwnedFile]
+    $target = $script:CatalogLookup[$script:AutoSelectedTargetFile]
+    if (-not $owned -or -not $target) { throw 'Terrain catalog mismatch：自动地图配置不在白名单中。' }
+    if (-not $script:CurrentMaps -and -not (Initialize-DotaInstallation)) { return $false }
+    if (-not (Test-VpkFile (Join-Path $script:CurrentMaps ([string]$owned.file)))) { throw '选择的源地图文件不存在，请重新选择。' }
+    if (-not (Test-VpkFile (Join-Path $script:CurrentMaps ([string]$target.file)))) { throw '选择的目标地图文件不存在，请验证 Dota 2 游戏文件。' }
     try {
-        if ([string]::IsNullOrWhiteSpace($script:AutoSelectedOwnedFile) -or [string]::IsNullOrWhiteSpace($script:AutoSelectedTargetFile)) {
-            throw '请先选择您已经拥有的地图和需要替换的目标地图。'
+        $script:AutoConfig = Get-AutoModeConfig
+        if ([string]$script:AutoConfig.ownedTerrain -ne [string]$owned.id -or [string]$script:AutoConfig.terrain -ne [string]$target.id) {
+            throw '当前地图选择尚未成功保存，请重新选择。'
         }
-        if ($script:AutoSelectedOwnedFile -eq $script:AutoSelectedTargetFile) { throw '已拥有地图和目标地图不能相同。' }
-        $owned = $script:CatalogLookup[$script:AutoSelectedOwnedFile]
-        $target = $script:CatalogLookup[$script:AutoSelectedTargetFile]
-        if (-not $owned -or -not $target) { throw 'Terrain catalog mismatch：自动地图配置不在白名单中。' }
-        if (-not $script:CurrentMaps -and -not (Initialize-DotaInstallation)) { return }
-        if (-not (Test-VpkFile (Join-Path $script:CurrentMaps ([string]$owned.file)))) { throw '选择的源地图文件不存在，请重新选择。' }
-        if (-not (Test-VpkFile (Join-Path $script:CurrentMaps ([string]$target.file)))) { throw '选择的目标地图文件不存在，请验证 Dota 2 游戏文件。' }
-        $previous = Get-AutoModeConfig
-        $config = [pscustomobject]@{
-            enabled       = $true
-            ownedTerrain  = [string]$owned.id
-            terrain       = [string]$target.id
-            mapsDirectory = $script:CurrentMaps
-            launcherPath  = [string]$previous.launcherPath
-        }
-        try { $script:AutoConfig = Save-AutoModeConfig -Config $config } catch { throw ('自动替换配置保存失败，未激活自动替换。' + $_.Exception.Message) }
-        [void](Update-AutoConfigVisuals -Config $script:AutoConfig)
-        $activationMessage = @'
-自动替换配置已保存。
+        $script:AutoConfig.enabled = $true
+        $script:AutoConfig.mapsDirectory = $script:CurrentMaps
+        $script:AutoConfig = Save-AutoModeConfig -Config $script:AutoConfig
+    } catch { throw ('自动替换开关保存失败，未开启自动替换。' + $_.Exception.Message) }
+    $script:AutoSelectionChangedThisRun = $false
+    [void](Update-AutoConfigVisuals -Config $script:AutoConfig)
+    Show-AutoSelectionSavedStatus
+    return $true
+}
+
+function Show-AutoActivationSuccessDialog {
+    $activationMessage = @'
+自动替换已开启。地图选择会在点击地图卡片时自动保存，无需再次确认。
 
 请将本软件提供的启动参数粘贴到：
 Steam 客户端 → 库 → 右键 Dota 2 → 属性 → 通用 → 启动选项
@@ -2145,7 +2221,7 @@ Steam 客户端 → 库 → 右键 Dota 2 → 属性 → 通用 → 启动选项
 
 配置完成后，本软件可以关闭。以后从 Steam 启动 Dota 2 时，程序会自动完成地图替换，并在 Dota 2 退出后恢复原地图。之后正常使用时无需再次手动打开本软件。
 
-如需停止自动替换，可打开本软件点击“取消激活”，或删除 Steam 启动选项中的本工具启动参数。
+如需停止自动替换，可打开本软件点击“关闭自动替换”，或删除 Steam 启动选项中的本工具启动参数。
 '@
         $steamExample = @'
 启动选项示例
@@ -2156,8 +2232,13 @@ Steam 客户端 → 库 → 右键 Dota 2 → 属性 → 通用 → 启动选项
 改成：
 "C:\...\Dota2MapSwitcher.exe" --auto %command% -perfectworld
 '@
-        $result = Show-AppDialog -Title '自动替换已激活' -Message $activationMessage -CodeExample $steamExample -PrimaryText '复制 Steam 启动参数' -SecondaryText '知道了' -Kind Success
-        if ($result.action -eq 'Primary') { [void](Copy-SteamLaunchOption) }
+    $result = Show-AppDialog -Title '自动替换已开启' -Message $activationMessage -CodeExample $steamExample -PrimaryText '复制 Steam 启动参数' -SecondaryText '知道了' -Kind Success
+    if ($result.action -eq 'Primary') { [void](Copy-SteamLaunchOption) }
+}
+
+$ui.ActivateAutoButton.Add_Click({
+    try {
+        if (Enable-AutoModeForUi) { Show-AutoActivationSuccessDialog }
     } catch { Show-OperationError $_.Exception.Message }
 })
 
@@ -2166,8 +2247,9 @@ $ui.CancelAutoButton.Add_Click({
         $config = Get-AutoModeConfig
         $config.enabled = $false
         $script:AutoConfig = Save-AutoModeConfig -Config $config
+        $script:AutoSelectionChangedThisRun = $false
         [void](Update-AutoConfigVisuals -Config $script:AutoConfig)
-        [void](Show-AppDialog -Title '自动替换已取消' -Message '已保存的地图选择仍然保留。即使 Steam 启动参数尚未删除，Dota 2 也会正常启动且不会修改地图。' -PrimaryText '知道了' -Kind Success)
+        [void](Show-AppDialog -Title '自动替换已关闭' -Message '已保存的地图选择仍然保留。即使 Steam 启动参数尚未删除，Dota 2 也会正常启动且不会修改地图。' -PrimaryText '知道了' -Kind Success)
     } catch { Show-OperationError $_.Exception.Message }
 })
 
@@ -2198,7 +2280,9 @@ function Show-ModeGuide {
 
 2. 选择需要被替换的目标地图
 
-3. 点击“激活自动替换”
+3. 点击“开启自动替换”
+
+地图选择会在点击卡片后自动保存；开启状态只控制 Steam 启动游戏时是否执行替换。
 
 4. 点击“复制 Steam 启动参数”，并将其添加到 Dota 2 的 Steam 启动选项中。
 
@@ -2328,7 +2412,9 @@ if (-not [string]::IsNullOrWhiteSpace($UiSnapshotPath)) {
 
 2. 选择需要被替换的目标地图
 
-3. 点击“激活自动替换”
+3. 点击“开启自动替换”
+
+地图选择会在点击卡片后自动保存；开启状态只控制 Steam 启动游戏时是否执行替换。
 
 4. 复制 Steam 启动参数，并将已有参数保留在 %command% 后面。
 
@@ -2338,9 +2424,9 @@ if (-not [string]::IsNullOrWhiteSpace($UiSnapshotPath)) {
                 [void](Show-AppDialog -Title '自动替换模式使用方法' -Message $message -CodeExample $example -PrimaryText '知道了' -ShowDoNotShow)
             }
             'AutoActivated' {
-                $message = "自动替换配置已保存。`r`n`r`n请将启动参数添加到 Dota 2 的 Steam 启动选项中。`r`n`r`n配置完成后，本软件可以关闭。"
+                $message = "自动替换已开启。地图选择会在点击卡片时自动保存。`r`n`r`n请将启动参数添加到 Dota 2 的 Steam 启动选项中。`r`n`r`n配置完成后，本软件可以关闭。"
                 $example = "启动选项示例`r`n`r`n原来：`r`n-perfectworld`r`n`r`n改成：`r`n`"C:\...\Dota2MapSwitcher.exe`" --auto %command% -perfectworld"
-                [void](Show-AppDialog -Title '自动替换已激活' -Message $message -CodeExample $example -PrimaryText '复制 Steam 启动参数' -SecondaryText '知道了' -Kind Success)
+                [void](Show-AppDialog -Title '自动替换已开启' -Message $message -CodeExample $example -PrimaryText '复制 Steam 启动参数' -SecondaryText '知道了' -Kind Success)
             }
             'Error' {
                 [void](Show-AppDialog -Title '操作失败' -Message "未找到有效的 Dota 2 安装目录。`r`n`r`n请检查 Steam Library 路径后重试。" -PrimaryText '确定' -Kind Error)
@@ -2363,6 +2449,16 @@ if ($UiSmokeTest) {
     if ($ui.NextButton.IsEnabled -or $ui.ModeSelectionPage.Visibility -ne [Windows.Visibility]::Visible) { throw 'Mode selection startup state test failed.' }
     if ($window.FindName('ModeTabs') -or $window.FindName('AutoOwnedCombo') -or $window.FindName('AutoTerrainCombo')) { throw 'Legacy tab/combo mode controls are still present.' }
     if ($window.FindName('SwapButton') -or $window.FindName('RestoreButton') -or $window.FindName('PathBox')) { throw 'Legacy controls are still visible.' }
+    $script:AutoSelectionChangedThisRun = $true
+    $smokeAutoConfig = [pscustomobject]@{ enabled=$false; launcherPath=$null }
+    [void](Update-AutoConfigVisuals -Config $smokeAutoConfig)
+    Show-AutoSelectionSavedStatus
+    if ($ui.ActivateAutoButton.Style -ne (Get-UiResource 'RtsAttentionButtonStyle') -or $ui.CopyStatusText.Text -notmatch '尚未开启' -or
+        $ui.CopyStatusBorder.Visibility -ne [Windows.Visibility]::Visible) {
+        throw 'Inactive automatic-mode reminder visual test failed.'
+    }
+    $ui.CopyStatusCloseButton.RaiseEvent((New-Object Windows.RoutedEventArgs ([Windows.Controls.Button]::ClickEvent)))
+    if ($ui.CopyStatusBorder.Visibility -ne [Windows.Visibility]::Collapsed) { throw 'Reminder close button test failed.' }
     Write-Output ('UI SMOKE TEST PASSED: two-step mode page; image cards=11; title=' + $window.Title)
     $window.Close()
     return
@@ -2420,6 +2516,22 @@ $window.Add_Closing({
         return
     }
     try {
+        if ($script:AutoSelectionChangedThisRun) {
+            $latestAutoConfig = Get-AutoModeConfig
+            if (-not $latestAutoConfig.enabled) {
+                $activationReminder = Show-AppDialog -Title '自动替换尚未开启' -Message "本次选择的自动替换地图已经保存，但自动替换开关仍处于关闭状态。`r`n`r`n如果现在关闭，下次从 Steam 启动 Dota 2 时不会替换地图。是否现在开启？" -PrimaryText '立即开启' -SecondaryText '暂不开启并关闭' -Kind Warning
+                if ($activationReminder.action -eq 'Primary') {
+                    if (-not (Enable-AutoModeForUi)) {
+                        $eventArgs.Cancel = $true
+                        return
+                    }
+                    Show-AutoActivationSuccessDialog
+                } else {
+                    $script:AutoSelectionChangedThisRun = $false
+                    [void](Update-AutoConfigVisuals -Config $latestAutoConfig)
+                }
+            }
+        }
         $state = Get-ActiveSwapState
         if (-not $state) {
             $script:AllowWindowClose = $true
@@ -2469,7 +2581,6 @@ if ($UiCloseTest) {
 }
 $window.Add_Closed({
     if ($script:SessionTimer) { $script:SessionTimer.Stop() }
-    if ($script:CopyStatusTimer) { $script:CopyStatusTimer.Stop() }
 })
 if ($script:LauncherPathMoved) {
     [void](Show-AppDialog -Title '启动参数路径已变化' -Message '检测到本程序的目录或文件路径已经变化。请进入“自动替换模式”重新复制 Steam 启动参数。普通模式不受影响。' -PrimaryText '知道了' -Kind Warning)
