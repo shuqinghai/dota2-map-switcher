@@ -334,7 +334,7 @@ function Get-ActiveSwapState {
             if (-not (Test-Path -LiteralPath $script:StateRegistryPath)) { return $null }
             $saved = Get-ItemProperty -LiteralPath $script:StateRegistryPath
             $state = [pscustomobject]@{
-                version       = [int]$saved.version
+                version       = if ($saved.PSObject.Properties.Name -contains 'version') { [int]$saved.version } else { 0 }
                 status        = [string]$saved.status
                 createdAt     = [string]$saved.createdAt
                 mapsDirectory = [string]$saved.mapsDirectory
